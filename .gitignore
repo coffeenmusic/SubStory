@@ -1,5 +1,6 @@
 Input/
 Output/
 .ipynb_checkpoints/
+__pycache__/
 Tmp/
 *.mp3
