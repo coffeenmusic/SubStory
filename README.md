@@ -86,7 +86,7 @@ The `process` method does the following:
 Note: The audio transcription and language detection features require the OpenAI's Whisper ASR system, which as of my knowledge cutoff in September 2021 is not publicly available. The implementation may require modifications to work with the actual Whisper ASR API. Please refer to the official OpenAI documentation for details on the Whisper ASR API.
 
 # Troubleshooting
-If having issues try running outside of Anaconda because MeCab conflicts with Anaconda. This code adds furigana and uses the furigana python package.
+- If using a video file with multiple tracks, make sure to specify the track number
 
 ### Recommended Extensions
 In Chrome, I like to use Furigana Toggle & Vocab Tracker together.

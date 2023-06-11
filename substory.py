@@ -9,7 +9,7 @@ import subprocess
 from datetime import timedelta
 from yattag import Doc, indent
 import time
-from furigana.furigana import split_furigana
+import pykakasi
 
 import warnings
 warnings.filterwarnings("ignore", message=".*The 'nopython' keyword.*")
@@ -23,7 +23,7 @@ class SubStory:
     def __init__(self, src_dir='Input', out_dir='Output', add_furigana=True, width=200, track_number=0, verbose=True, language=None):
         self.src_dir = src_dir
         self.out_dir = out_dir
-        self._add_furigana = add_furigana
+        self.add_furigana = add_furigana
         self.width = width
         self.track_number = track_number
         self.language = language
@@ -78,16 +78,21 @@ class SubStory:
 
     def _add_sub(self, doc, sub):
         with doc.tag('div'):
-            doc.text(sub) 
+            doc.asis(sub) 
 
     def _add_furigana(self, text):
         w_furigana = ''
-        for pair in split_furigana(text):
-            if len(pair)==2:
-                kanji,hira = pair
-                w_furigana +=  f"<ruby><rb>{kanji}</rb><rt>{hira}</rt></ruby>"
+        
+        kks = pykakasi.kakasi()
+        result = kks.convert(text)       
+        for item in result:
+            hira, orig = item['hira'].strip(), item['orig'].strip()
+            
+            if hira != orig:
+                w_furigana +=  f"<ruby><rb>{orig}</rb><rt>{hira}</rt></ruby>"
             else:
-                w_furigana += pair[0]
+                w_furigana += orig
+        
         return w_furigana
 
     def _build_html_doc(self, prj_dir, vid_file, aud_file, sub_file, base_filename, lines_indexed, audio_mode='normal', pad=0.5, line_sep=True):
@@ -142,7 +147,7 @@ class SubStory:
                 for idx, r in enumerate(lines_indexed):
                     line_idx, time_str = r[:2]
                     sub_list = r[2:]
-                    if self._add_furigana:
+                    if self.add_furigana:
                         tmp = []
                         for s in sub_list:
                             try:
@@ -283,8 +288,8 @@ class SubStory:
                     model = whisper.load_model("base", device=self.device)
                     audio = whisper.load_audio(aud_file)
                     lang = self.language if self.language else self._get_language(model, audio)
-                    if self._add_furigana and lang != 'jp':
-                        self._add_furigana = False
+                    if self.add_furigana and lang != 'jp':
+                        self.add_furigana = False
                         
                     transcription = model.transcribe(audio, language=lang)
                     
