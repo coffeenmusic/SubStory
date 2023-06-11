@@ -5,11 +5,14 @@ from tqdm import tqdm
 import whisper
 import torch
 import moviepy.editor as mp
-#from moviepy.video.io.VideoFileClip import VideoFileClip
 import subprocess
 from datetime import timedelta
 from yattag import Doc, indent
 import time
+from furigana.furigana import split_furigana
+
+import warnings
+warnings.filterwarnings("ignore", message=".*The 'nopython' keyword.*")
 
 
 class SubStory:
@@ -17,18 +20,17 @@ class SubStory:
     aud_exts=['.mp3']
     sub_exts=['.srt']
     
-    def __init__(self, src_dir='Input', out_dir='Output', _add_furigana=True, width=200, track_number=0, verbose=True):
+    def __init__(self, src_dir='Input', out_dir='Output', add_furigana=True, width=200, track_number=0, verbose=True, language=None):
         self.src_dir = src_dir
         self.out_dir = out_dir
-        self._add_furigana = _add_furigana
+        self._add_furigana = add_furigana
         self.width = width
         self.track_number = track_number
+        self.language = language
         self.files = [os.path.join(src_dir, f) for f in os.listdir(src_dir)]
         self.proj_files = [os.path.splitext(f)[0] for f in self.files if os.path.splitext(f)[-1] in self.vid_exts]
         self.proj_files += [os.path.splitext(f)[0] for f in self.files if os.path.splitext(f)[-1] in self.aud_exts and os.path.splitext(f)[0] not in self.proj_files]
-        self.device = whisper.torch.device('cuda' if whisper.torch.cuda.is_available() else 'cpu')
-        if self._add_furigana:
-            from furigana.furigana import split_furigana
+        self.device = whisper.torch.device('cuda' if whisper.torch.cuda.is_available() else 'cpu')            
 
     def __file_to_line_list(self, filename, encoding='utf-8-sig'):
         line_list = []
@@ -280,11 +282,11 @@ class SubStory:
                     
                     model = whisper.load_model("base", device=self.device)
                     audio = whisper.load_audio(aud_file)
-                    lang = self._get_language(model, audio)
+                    lang = self.language if self.language else self._get_language(model, audio)
                     if self._add_furigana and lang != 'jp':
                         self._add_furigana = False
                         
-                    transcription = model.transcribe(audio)
+                    transcription = model.transcribe(audio, language=lang)
                     
                     print('Exporting subtitle.')
                     sub_file = self.transcribe_audio(transcription, prj)
