@@ -2,7 +2,7 @@ import argparse
 from substory import SubStory
 
 def main(args):    
-    ss = SubStory(src_dir=args.source_dir, out_dir=args.output_dir, add_furigana=args.add_furigana, width=args.width, track_number=args.track, verbose=args.verbose, language=args.language)
+    ss = SubStory(src_dir=args.source_dir, out_dir=args.output_dir, add_furigana=args.add_furigana, export_width=args.width, track_number=args.track, verbose=args.verbose, language=args.language)
     ss.process()
 
 if __name__ == "__main__":

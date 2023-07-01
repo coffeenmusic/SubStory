@@ -20,11 +20,11 @@ class SubStory:
     aud_exts=['.mp3']
     sub_exts=['.srt']
     
-    def __init__(self, src_dir='Input', out_dir='Output', add_furigana=True, width=200, track_number=0, verbose=True, language=None):
+    def __init__(self, src_dir='Input', out_dir='Output', add_furigana=True, export_width=200, track_number=0, verbose=True, language=None):
         self.src_dir = src_dir
         self.out_dir = out_dir
         self.add_furigana = add_furigana
-        self.width = width
+        self.width = export_width
         self.track_number = track_number
         self.language = language
         self.files = [os.path.join(src_dir, f) for f in os.listdir(src_dir)]
@@ -165,10 +165,13 @@ class SubStory:
                             new_filename = prj_name + '_' + str(time_ms) + '.jpg'
                             path = os.path.join(prj_dir, new_filename)
                             if not(os.path.exists(path)):
-                                cv2.imwrite(path, image)
-                            h, w = image.shape[:-1]
-                            ratio = h/w
-                            self._add_image(doc, new_filename, idx, w=self.width, h=int(self.width*ratio))
+                                h, w = image.shape[:-1]
+                                ratio = h/w
+                                new_height = int(self.width*ratio)
+                                resized_image = cv2.resize(image, (self.width, new_height))
+                                cv2.imwrite(path, resized_image)
+      
+                                self._add_image(doc, new_filename, idx, w=self.width, h=int(self.width*ratio))
                     for s in sub_list:
                         self._add_sub(doc, s)
                     if audio_mode != 'off':                    
@@ -288,8 +291,11 @@ class SubStory:
                     model = whisper.load_model("base", device=self.device)
                     audio = whisper.load_audio(aud_file)
                     lang = self.language if self.language else self._get_language(model, audio)
-                    if self.add_furigana and lang != 'jp':
+                    if self.add_furigana and lang not in ['ja', 'jp']:
                         self.add_furigana = False
+                        print('Set add furigana False')
+                        
+                    print(f'Add Furigana: {self.add_furigana}')
                         
                     transcription = model.transcribe(audio, language=lang)
                     

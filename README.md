@@ -39,7 +39,7 @@ pip install furigana  # optional, if you want to add furigana to Japanese subtit
 ```
 
 ## Usage
-To use SubStory, import the class and create an instance. The `src_dir` parameter should be set to the directory where your input files are located. If you want to add furigana to Japanese subtitles, set `add_furigana=True`.
+To use SubStory, import the class and create an instance. The `src_dir` parameter should be set to the directory where your input files are located. If you want to add furigana to Japanese subtitles, set `add_furigana=True`. If files are added to the source directory that share the same name, such as an .mkv and .srt or .mp3, it will start with the provided srt file instead of generating one with whisper.
 
 ```python
 from substory import SubStory
