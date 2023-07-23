@@ -10,6 +10,11 @@ from datetime import timedelta
 from yattag import Doc, indent
 import time
 import pykakasi
+import openai
+import json
+import tiktoken
+import math
+from collections import OrderedDict
 
 import warnings
 warnings.filterwarnings("ignore", message=".*The 'nopython' keyword.*")
@@ -20,13 +25,16 @@ class SubStory:
     aud_exts=['.mp3']
     sub_exts=['.srt']
     
-    def __init__(self, src_dir='Input', out_dir='Output', add_furigana=True, export_width=200, track_number=0, verbose=True, language=None):
+    def __init__(self, src_dir='Input', out_dir='Output', add_furigana=True, export_width=200, track_number=0, verbose=True, language=None, 
+                 use_gpt=False, gpt_model='gpt-3.5-turbo-0613'):
         self.src_dir = src_dir
         self.out_dir = out_dir
         self.add_furigana = add_furigana
         self.width = export_width
         self.track_number = track_number
         self.language = language
+        self.use_gpt = use_gpt
+        self.gpt_model = gpt_model
         self.files = [os.path.join(src_dir, f) for f in os.listdir(src_dir)]
         self.proj_files = [os.path.splitext(f)[0] for f in self.files if os.path.splitext(f)[-1] in self.vid_exts]
         self.proj_files += [os.path.splitext(f)[0] for f in self.files if os.path.splitext(f)[-1] in self.aud_exts and os.path.splitext(f)[0] not in self.proj_files]
@@ -95,7 +103,7 @@ class SubStory:
         
         return w_furigana
 
-    def _build_html_doc(self, prj_dir, vid_file, aud_file, sub_file, base_filename, lines_indexed, audio_mode='normal', pad=0.5, line_sep=True):
+    def _build_html_doc(self, prj_dir, vid_file, aud_file, sub_file, base_filename, line_dict, audio_mode='normal', pad=0.5, line_sep=True):
         prj_name = os.path.basename(prj_dir)
         if vid_file:
             video_capture = cv2.VideoCapture(vid_file)
@@ -144,9 +152,10 @@ class SubStory:
                                 ('id', 'slider'), ('oninput', 'updateImageSize()')):
                         pass
 
-                for idx, r in enumerate(lines_indexed):
-                    line_idx, time_str = r[:2]
-                    sub_list = r[2:]
+                for idx, line_idx in enumerate(line_dict):
+                    time_str, *sub_list = line_dict[line_idx]
+                    #line_idx, time_str = r[:2]
+                    #sub_list = r[2:]
                     if self.add_furigana:
                         tmp = []
                         for s in sub_list:
@@ -229,6 +238,144 @@ class SubStory:
                 srtFile.write(segment)
                 
         return savepath
+    
+    def __flatten_dict(self, d, flat=''):
+            for k, v in d.items():
+                if type(v) == dict:
+                    flat += self.__flatten_dict(v, flat=flat)
+                elif type(v) == list:
+                    flat += ''.join([l for l in v])
+                else:
+                    flat += str(v)
+                    
+            return flat
+    
+    def __split_dict_on_token_len(self, line_dict, encoding=None, encoder='cl100k_base', max_tkn=4096):
+            if encoding is None:
+                encoding = tiktoken.get_encoding(encoder)
+
+            split_list = []
+            cur_dict = OrderedDict()
+            cur_tkn_count = 0
+
+            for index, text in sorted(line_dict.items(), key=lambda item: int(item[0])):  # Sorting by integer keys
+                enc_list = encoding.encode(text)
+                
+                if cur_tkn_count + len(enc_list) <= max_tkn:
+                    cur_dict[index] = text
+                    cur_tkn_count += len(enc_list)
+                else:
+                    # Append current dictionary to split list and start a new one
+                    split_list.append(dict(cur_dict))
+                    cur_dict = OrderedDict({index: text})
+                    cur_tkn_count = len(enc_list)
+
+            # Don't forget to append the last dictionary
+            if cur_dict:
+                split_list.append(cur_dict)
+            
+            return split_list
+    
+    def clean_with_gpt(self, orig_line_dict, prj, encoder='cl100k_base'):
+
+        def get_token_len(text):
+            encoding = tiktoken.get_encoding(encoder)
+            return len(encoding.encode(text))
+
+        line_dict = {k: ''.join(v[1:]) for k, v in orig_line_dict.items()}
+
+        openai.api_key = os.getenv('OPENAI_API_KEY')
+
+        system_message = (
+        'You are a multilingual audio transcription support agent. You will take in an audio transcription that likely originated'
+        ' as audio from a movie, tv show, podcast, or similar type of multimedia. Correct any transcription'
+        ' mistakes. You will have a much larger context to base the transcriptions on and can more accurately transcribe'
+        f' each word based on this context. This transcript is from {os.path.basename(prj)}.'
+        )
+
+        # Used to force returned data to adhere to a dictionary format
+        functions = [
+            {
+                "name": "update_corrected_transcript",
+                "description": "Update transcript with corrected transcriptions from input dictionary",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "transcript_dict": {
+                            "type": "object",
+                            "description": "Dictionary of index/transcript pairs",
+                            "properties": {
+                                "index": {
+                                    "type": "integer",
+                                    "description": "Line Index"
+                                },
+                                "line": {
+                                    "type": "string",
+                                    "description": "Single line of the transcript. Can contain multiple sentences."
+                                }
+                            },
+                            "required": ["index", "line"]
+                        }
+                    },
+                    "required": ["transcript_dict"]
+                }
+            }
+        ]
+        
+        if openai.api_key != None:
+
+            print('Cleaning transcriptions with GPT API...')
+        
+            # Estimate tokens of function call
+            flat = self.__flatten_dict(functions[0]) 
+            encoding = tiktoken.get_encoding(encoder)
+            prefix_len = len(encoding.encode(system_message)) + get_token_len(flat)
+
+            tkn_cnt_dict = {'gpt-3.5-turbo-0613': 4096, 'gpt-4-0613': 8192} # Must support function calling
+
+            max_tokens = int(tkn_cnt_dict[self.gpt_model]/4) - prefix_len
+            split_list = self.__split_dict_on_token_len(line_dict, max_tkn = max_tokens, encoder=encoder)
+
+            for split_dict in split_list:
+                cmp_context = str(split_dict)
+
+                tlen = get_token_len(cmp_context)
+                print(f'GPT Token Lengths: Total={tlen + prefix_len}, Prefix={prefix_len}, Message={tlen}')
+
+                messages=[
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": cmp_context}
+                ]
+
+                response = openai.ChatCompletion.create(
+                    model=self.gpt_model, 
+                    messages=messages,
+                    functions=functions,
+                    function_call={'name': 'update_corrected_transcript'}, # Always use function
+                )
+
+                try:
+                    reply_content = response.choices[0].message
+
+                    funcs = reply_content.to_dict()['function_call']['arguments']
+                    funcs = json.loads(funcs)
+
+                    gpt_dict = funcs['transcript_dict']
+
+                    for k, v in gpt_dict.items():
+                        if k in orig_line_dict:
+                            line = orig_line_dict[k]
+                            line[1:] = v if type(v) == list else [v]
+                            orig_line_dict[k] = line
+
+                except Exception as e:
+                    print(f'{e} Failed on gpt call. Skipping...')
+                    continue
+        else:
+            print('No OpenAI API KEY found. Please add to environmental variables.')
+                
+        return orig_line_dict          
+
 
     def _get_prj_media(self, base_filename):
         has_ext = lambda exts: [f for f in self.files if f.startswith(base_filename) and os.path.splitext(f)[-1].lower() in exts]
@@ -274,7 +421,7 @@ class SubStory:
             print(f'Audio File: {aud_file}')
             print(f'Subtitle File: {sub_file}')
             
-            # if audio doesnt exist extract it from video
+            # If audio doesnt exist extract it from video
             if aud_file == None:
                 if vid_file:
                     print(f'Extracting mp3 from {prj}...')
@@ -283,7 +430,7 @@ class SubStory:
                     print(f'Audio File Extracted: {aud_file}')
                     print('Finished extracting audio.')
             
-            # Use subtitle file doesn't exists create it
+            # If subtitle file doesn't exists create it
             if sub_file == None:
                 if os.path.exists(aud_file):
                     print(f'Creating transcript using OpenAIs Whisper for {aud_file}.')
@@ -307,6 +454,7 @@ class SubStory:
                 
             # Check if subtitle exists
             if os.path.exists(sub_file):
+                
                 print('Generating Audio Visual HTML Page')
                 
                 prj_name = os.path.basename(prj).replace(' ','_')
@@ -316,8 +464,12 @@ class SubStory:
 
                 line_list = self.__file_to_line_list(sub_file)
                 lines_indexed = self.__chunk_sub_idx_to_list(line_list)
+                line_dict = {l[0]:l[1:] for l in lines_indexed}
 
-                html = self._build_html_doc(prj_dir, vid_file, aud_file, sub_file, prj, lines_indexed)
+                if self.use_gpt:
+                    line_dict = self.clean_with_gpt(line_dict, prj)
+
+                html = self._build_html_doc(prj_dir, vid_file, aud_file, sub_file, prj, line_dict)
 
                 save_path = os.path.join(prj_dir, prj_name + '.html')
                 

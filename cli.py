@@ -2,7 +2,14 @@ import argparse
 from substory import SubStory
 
 def main(args):    
-    ss = SubStory(src_dir=args.source_dir, out_dir=args.output_dir, add_furigana=args.add_furigana, export_width=args.width, track_number=args.track, verbose=args.verbose, language=args.language)
+    ss = SubStory(src_dir=args.source_dir, 
+                  out_dir=args.output_dir, 
+                  add_furigana=args.add_furigana, 
+                  export_width=args.width, 
+                  track_number=args.track, 
+                  verbose=args.verbose, 
+                  language=args.language, use_gpt=args.use_gpt)
+    
     ss.process()
 
 if __name__ == "__main__":
@@ -14,6 +21,7 @@ if __name__ == "__main__":
     parser.add_argument('--track', type=int, help="Video's Audio Track Number", default=0)
     parser.add_argument('--verbose', action='store_true', help='Print on or off.')
     parser.add_argument('--language', type=str, help='Language abbreviation (e.g., "ja" for Japanese)', default=None)
+    parser.add_argument('--use-gpt', action='store_true', help='Use gpt api to clean transcription.')
     args = parser.parse_args()
 
     main(args)
